@@ -246,6 +246,15 @@ async def _run_server(
             jwe_keys_newly_generated,
         )
 
+        def load_configuration(signum, frame):
+            logger.info("reloading configuration")
+            ss.get_loop().call_soon_threadsafe(
+                ss.reload_tls, args.tls_cert_file, args.tls_key_file)
+            ss.get_loop().call_soon_threadsafe(
+                ss.load_jwcrypto, args.jws_key_file, args.jwe_key_file)
+
+        signal.signal(signal.SIGHUP, load_configuration)
+
         try:
             await sc.wait_for(ss.start())
 
