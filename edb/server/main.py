@@ -246,7 +246,11 @@ async def _run_server(
             jwe_keys_newly_generated,
         )
 
+        handler = signal.getsignal(signal.SIGHUP)
+        handler = handler if callable(handler) else lambda s, f: None
+
         def load_configuration(signum, frame):
+            handler(signum, frame)
             logger.info("reloading configuration")
             ss.get_loop().call_soon_threadsafe(
                 ss.reload_tls, args.tls_cert_file, args.tls_key_file)
