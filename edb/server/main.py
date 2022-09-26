@@ -246,18 +246,18 @@ async def _run_server(
             jwe_keys_newly_generated,
         )
 
-        handler = signal.getsignal(signal.SIGHUP)
-        handler = handler if callable(handler) else lambda s, f: None
-
-        def load_configuration(signum, frame):
-            handler(signum, frame)
+        def load_configuration(_signum):
             logger.info("reloading configuration")
-            ss.get_loop().call_soon_threadsafe(
-                ss.reload_tls, args.tls_cert_file, args.tls_key_file)
-            ss.get_loop().call_soon_threadsafe(
-                ss.load_jwcrypto, args.jws_key_file, args.jwe_key_file)
-
-        signal.signal(signal.SIGHUP, load_configuration)
+            try:
+                ss.reload_tls(args.tls_cert_file, args.tls_key_file)
+                ss.load_jwcrypto(args.jws_key_file, args.jwe_key_file)
+            except Exception:
+                logger.critical(
+                    "Unexpected error occurred during reload configuration; "
+                    "shutting down.",
+                    exc_info=True,
+                )
+                ss.request_shutdown()
 
         try:
             await sc.wait_for(ss.start())
@@ -270,10 +270,12 @@ async def _run_server(
             # Notify systemd that we've started up.
             service_manager.sd_notify('READY=1')
 
-            try:
-                await sc.wait_for(ss.serve_forever())
-            except signalctl.SignalError as e:
-                logger.info('Received signal: %s.', e.signo)
+            with signalctl.SignalController(signal.SIGHUP) as reload_ctl:
+                reload_ctl.add_handler(load_configuration)
+                try:
+                    await sc.wait_for(ss.serve_forever())
+                except signalctl.SignalError as e:
+                    logger.info('Received signal: %s.', e.signo)
         finally:
             service_manager.sd_notify('STOPPING=1')
             logger.info('Shutting down.')
